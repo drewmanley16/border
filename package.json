@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "routing:dev": "npm run dev -w services/routing",
+    "routing:test": "npm test -w services/routing"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",
@@ -41,5 +43,10 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^5.0.5"
-  }
+  },
+  "workspaces": [
+    "services/*",
+    "packages/*",
+    "examples/*"
+  ]
 }

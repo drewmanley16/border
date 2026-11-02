@@ -1,0 +1,17 @@
+{
+  "name": "@stableflow/example-compare-routes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx --env-file-if-exists=.env index.ts"
+  },
+  "dependencies": {
+    "@stableflow/sdk": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

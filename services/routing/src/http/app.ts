@@ -1,0 +1,286 @@
+import { randomUUID } from "node:crypto";
+import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import { hasZodFastifySchemaValidationErrors, isResponseSerializationError, jsonSchemaTransform, jsonSchemaTransformObject, serializerCompiler, validatorCompiler, type ZodTypeProvider } from "fastify-type-provider-zod";
+import type { Redis } from "ioredis";
+import { z } from "zod";
+import type { Env } from "../config/env.js";
+import { ApiError } from "../domain/errors.js";
+import type { CompareRequest } from "../domain/types.js";
+import type { ProviderRegistry } from "../providers/registry.js";
+import { ASSUMPTIONS, ESTIMATE_DISCLAIMER, QUOTE_VERSION, type QuoteService } from "../quotes/service.js";
+import { buildVisualization } from "../quotes/visualization.js";
+import type { ApiKeyRecord, Store } from "../store/types.js";
+import { hashApiKey } from "./apiKeys.js";
+import { compareRequestSchema, compareResponseSchema, corridorQuerySchema, corridorsResponseSchema, errorSchema, healthResponseSchema, providersResponseSchema, routeDetailSchema, visualizationSchema } from "./schemas.js";
+
+declare module "fastify" {
+  interface FastifyRequest {
+    apiKey?: ApiKeyRecord;
+  }
+}
+
+export interface AppDependencies {
+  env: Env;
+  store: Store;
+  storeType: "postgres" | "memory";
+  registry: ProviderRegistry;
+  quotes: QuoteService;
+  redis?: Redis;
+  now: () => Date;
+  logger?: boolean | object;
+}
+
+const VERSION = "0.1.0";
+const REQUEST_ID_PATTERN = /^[\w-]{8,64}$/;
+
+function presentedKey(request: FastifyRequest): string | null {
+  const header = request.headers["x-api-key"];
+  if (typeof header === "string" && header) return header;
+  const match = /^Bearer\s+(\S+)$/i.exec(request.headers.authorization ?? "");
+  return match?.[1] ?? null;
+}
+
+const errorResponses = {
+  400: errorSchema,
+  401: errorSchema,
+  404: errorSchema,
+  422: errorSchema,
+  429: errorSchema,
+  503: errorSchema,
+};
+
+export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> {
+  const { env, store, registry, quotes, redis, now } = deps;
+
+  const app = Fastify({
+    logger: deps.logger ?? {
+      level: env.LOG_LEVEL,
+      redact: { paths: ["req.headers.authorization", 'req.headers["x-api-key"]', "req.headers.cookie"], remove: true },
+    },
+    genReqId: (request) => {
+      const supplied = request.headers["x-request-id"];
+      return typeof supplied === "string" && REQUEST_ID_PATTERN.test(supplied) ? supplied : randomUUID();
+    },
+    bodyLimit: 32 * 1024,
+  });
+
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+
+  app.addHook("onSend", async (request, reply) => {
+    reply.header("x-request-id", request.id);
+  });
+
+  app.setErrorHandler((error: unknown, request, reply) => {
+    const respond = (statusCode: number, code: string, message: string, details?: unknown) =>
+      reply.status(statusCode).send({ error: { code, message, requestId: request.id, ...(details === undefined ? {} : { details }) } });
+
+    if (error instanceof ApiError) return respond(error.statusCode, error.code, error.message, error.details);
+    if (hasZodFastifySchemaValidationErrors(error)) {
+      const issues = error.validation.map(({ instancePath, message }) => ({ path: instancePath, message }));
+      return respond(400, "validation_error", "The request is invalid.", { issues });
+    }
+    if (isResponseSerializationError(error)) {
+      request.log.error({ err: error }, "response failed its schema");
+      return respond(500, "internal_error", "Something went wrong on our side.");
+    }
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status === 429) return respond(429, "rate_limited", "Too many requests. Slow down and retry after the reset time.");
+    if (status && status >= 400 && status < 500) {
+      return respond(status, "bad_request", error instanceof Error ? error.message : "The request is invalid.");
+    }
+    request.log.error({ err: error }, "unhandled error");
+    return respond(500, "internal_error", "Something went wrong on our side.");
+  });
+
+  app.setNotFoundHandler((request, reply) =>
+    reply.status(404).send({ error: { code: "not_found", message: `No endpoint at ${request.method} ${request.url}.`, requestId: request.id } }),
+  );
+
+  await app.register(helmet, { contentSecurityPolicy: false });
+  await app.register(cors, { origin: env.CORS_ORIGINS.length > 0 ? env.CORS_ORIGINS : false, allowedHeaders: ["content-type", "authorization", "x-api-key", "x-request-id"] });
+
+  await app.register(rateLimit, {
+    global: true,
+    max: env.RATE_LIMIT_MAX,
+    timeWindow: env.RATE_LIMIT_WINDOW_MS,
+    skipOnError: true,
+    ...(redis ? { redis } : {}),
+    // Hashed so raw keys can't end up in Redis.
+    keyGenerator: (request) => {
+      const key = presentedKey(request);
+      return key ? `key:${hashApiKey(key)}` : `ip:${request.ip}`;
+    },
+    allowList: (request) => !request.url.startsWith("/v1/") || request.url.startsWith("/v1/health"),
+  });
+
+  await app.register(swagger, {
+    openapi: {
+      openapi: "3.1.0",
+      info: {
+        title: "StableFlow Routing API",
+        version: VERSION,
+        description:
+          "Compares international payment routes across stablecoins, blockchains, FX providers and local payout rails. Quote comparison only: this API moves no money. All current data is simulated and illustrative, and every quote is a nonbinding estimate.",
+      },
+      tags: [
+        { name: "Routes", description: "Compare and inspect payment routes" },
+        { name: "Catalog", description: "Supported corridors and providers" },
+        { name: "System", description: "Service health" },
+      ],
+      components: {
+        securitySchemes: {
+          apiKey: { type: "apiKey", in: "header", name: "x-api-key" },
+          bearer: { type: "http", scheme: "bearer" },
+        },
+      },
+    },
+    transform: jsonSchemaTransform,
+    transformObject: jsonSchemaTransformObject,
+  });
+  await app.register(swaggerUi, { routePrefix: "/docs" });
+
+  const api = app.withTypeProvider<ZodTypeProvider>();
+
+  const authenticate = async (request: FastifyRequest) => {
+    const key = presentedKey(request);
+    if (!key) throw new ApiError(401, "missing_api_key", "Send your API key in the x-api-key header.");
+    const record = await store.findActiveApiKey(hashApiKey(key));
+    if (!record) throw new ApiError(401, "invalid_api_key", "This API key is invalid or has been revoked.");
+    if (record.environment !== env.STABLEFLOW_ENV) {
+      throw new ApiError(401, "wrong_environment", `This key is for ${record.environment}, and this server runs ${env.STABLEFLOW_ENV}.`);
+    }
+    request.apiKey = record;
+  };
+  const secured: Record<string, string[]>[] = [{ apiKey: [] }, { bearer: [] }];
+
+  api.post("/v1/routes/compare", {
+    onRequest: authenticate,
+    schema: {
+      tags: ["Routes"],
+      summary: "Compare payment routes",
+      description: "Returns every eligible route, ranked by `optimizeFor`. Estimates are nonbinding. In sandbox, `x-simulation-scenario` selects a seeded scenario.",
+      security: secured,
+      headers: z.object({ "x-simulation-scenario": z.string().optional() }),
+      body: compareRequestSchema,
+      response: { 200: compareResponseSchema, ...errorResponses },
+    },
+  }, async (request) => {
+    const scenario = request.headers["x-simulation-scenario"];
+    return quotes.compare(request.body as CompareRequest, request.apiKey!.id, typeof scenario === "string" ? scenario : undefined);
+  });
+
+  const routeParams = z.object({ routeId: z.string().min(1) });
+
+  api.get("/v1/routes/:routeId", {
+    onRequest: authenticate,
+    schema: {
+      tags: ["Routes"],
+      summary: "Get a stored route",
+      description: "Stays readable after expiry, with `quoteStatus` set to `expired`.",
+      security: secured,
+      params: routeParams,
+      response: { 200: routeDetailSchema, ...errorResponses },
+    },
+  }, async (request) => {
+    const { quote, route } = await quotes.findRoute(request.params.routeId, request.apiKey!.id);
+    return {
+      ...route,
+      quoteVersion: quote.version ?? QUOTE_VERSION,
+      quoteStatus: new Date(route.expiresAt) <= now() ? ("expired" as const) : ("active" as const),
+      quoteCreatedAt: quote.createdAt.toISOString(),
+      binding: false as const,
+      disclaimer: ESTIMATE_DISCLAIMER,
+      assumptions: ASSUMPTIONS,
+    };
+  });
+
+  api.get("/v1/routes/:routeId/visualization", {
+    onRequest: authenticate,
+    schema: {
+      tags: ["Routes"],
+      summary: "Get globe-ready route data",
+      description: "Describes a hypothetical route. Coordinates are representative, and nothing here is a real payment.",
+      security: secured,
+      params: routeParams,
+      response: { 200: visualizationSchema, ...errorResponses },
+    },
+  }, async (request) => {
+    const { quote, route } = await quotes.findRoute(request.params.routeId, request.apiKey!.id);
+    return buildVisualization(quote, route, now());
+  });
+
+  api.get("/v1/corridors", {
+    schema: {
+      tags: ["Catalog"],
+      summary: "List supported corridors",
+      querystring: corridorQuerySchema,
+      response: { 200: corridorsResponseSchema, ...errorResponses },
+    },
+  }, async (request) => ({ corridors: await store.listCorridors(request.query) }));
+
+  api.get("/v1/providers", {
+    schema: {
+      tags: ["Catalog"],
+      summary: "List providers and capabilities",
+      response: { 200: providersResponseSchema, ...errorResponses },
+    },
+  }, async () => {
+    const disabled = await store.disabledProviderIds();
+    const providers = await Promise.all(
+      registry.providers().map(async (provider) => {
+        const [capabilities, health] = await Promise.all([provider.getCapabilities(), provider.getHealth()]);
+        return {
+          id: provider.id,
+          name: provider.name,
+          type: provider.type,
+          mode: provider.dataSource,
+          enabled: !disabled.has(provider.id),
+          supportedCountries: capabilities.countries,
+          supportedCurrencies: capabilities.currencies,
+          fundingMethods: capabilities.fundingMethods,
+          payoutMethods: capabilities.payoutMethods,
+          stablecoins: capabilities.stablecoins,
+          blockchains: capabilities.networks,
+          health,
+        };
+      }),
+    );
+    return { providers, note: "Simulated providers are illustrative and don't represent any real company." };
+  });
+
+  api.get("/v1/health", {
+    schema: {
+      tags: ["System"],
+      summary: "Readiness and dependency health",
+      response: { 200: healthResponseSchema, 503: healthResponseSchema },
+    },
+  }, async (_request, reply) => {
+    const database = await store.ping().then(() => "ok" as const, () => "unavailable" as const);
+    const redisStatus = !redis ? ("not_configured" as const) : await redis.ping().then(() => "ok" as const, () => "unavailable" as const);
+    const health = await Promise.all(registry.providers().map((provider) => provider.getHealth().catch(() => ({ status: "unavailable" as const }))));
+    const count = (status: string) => health.filter((entry) => entry.status === status).length;
+    const healthy = count("healthy");
+
+    const status = database !== "ok" || healthy + count("degraded") === 0 ? "unavailable" : redisStatus === "unavailable" || healthy < health.length ? "degraded" : "ok";
+    return reply.status(status === "unavailable" ? 503 : 200).send({
+      status,
+      environment: env.STABLEFLOW_ENV,
+      version: VERSION,
+      dependencies: {
+        database: { status: database, type: deps.storeType },
+        redis: { status: redisStatus },
+        providers: { total: health.length, healthy, degraded: count("degraded"), unavailable: count("unavailable") },
+      },
+    });
+  });
+
+  app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
+
+  return app;
+}

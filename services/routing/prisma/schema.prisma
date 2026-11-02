@@ -1,0 +1,123 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  // Explicit, because Docker generates this before tsconfig.json is present.
+  importFileExtension = "js"
+  moduleFormat        = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProviderType {
+  stablecoin
+  bank_fx
+  bridge
+}
+
+enum Environment {
+  sandbox
+  production
+}
+
+enum DataSource {
+  simulated
+  live
+}
+
+enum QuoteStatus {
+  active
+  expired
+}
+
+model Provider {
+  id         String           @id
+  name       String
+  type       ProviderType
+  enabled    Boolean          @default(true)
+  dataSource DataSource       @default(simulated)
+  /// Non-secret settings only. Credentials belong in the environment.
+  config     Json             @default("{}")
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  metrics    ProviderMetric[]
+}
+
+model Corridor {
+  id                      String   @id @default(cuid())
+  sourceCountry           String
+  destinationCountry      String
+  sourceCurrency          String
+  destinationCurrency     String
+  supportedFundingMethods String[]
+  supportedPayoutMethods  String[]
+  enabled                 Boolean  @default(true)
+
+  @@unique([sourceCountry, destinationCountry, sourceCurrency, destinationCurrency])
+  @@index([sourceCountry, sourceCurrency])
+  @@index([destinationCountry, destinationCurrency])
+}
+
+model ApiKey {
+  id          String      @id @default(cuid())
+  name        String
+  /// SHA-256 of the key. The key itself is never stored.
+  keyHash     String      @unique
+  /// First characters, so a key can be recognized in a dashboard or log.
+  keyPrefix   String
+  environment Environment @default(sandbox)
+  createdAt   DateTime    @default(now())
+  revokedAt   DateTime?
+  quotes      Quote[]
+}
+
+model Quote {
+  id             String      @id
+  apiKeyId       String
+  apiKey         ApiKey      @relation(fields: [apiKeyId], references: [id])
+  version        Int         @default(1)
+  requestPayload Json
+  scenario       String?
+  createdAt      DateTime    @default(now())
+  expiresAt      DateTime
+  environment    Environment
+  status         QuoteStatus @default(active)
+  routes         Route[]
+
+  @@index([apiKeyId, createdAt])
+  @@index([expiresAt])
+}
+
+model Route {
+  id                String   @id
+  quoteId           String
+  quote             Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  providerIds       String[]
+  network           String?
+  stablecoin        String?
+  totalFees         Decimal  @db.Decimal(24, 6)
+  recipientAmount   Decimal  @db.Decimal(24, 6)
+  estimatedDuration Int
+  reliability       Decimal  @db.Decimal(8, 6)
+  rankingScore      Decimal  @db.Decimal(12, 6)
+  rank              Int
+  routeDetails      Json
+
+  @@index([quoteId])
+}
+
+/// `dataSource` keeps observed live metrics apart from simulated assumptions.
+model ProviderMetric {
+  id              String      @id @default(cuid())
+  providerId      String
+  provider        Provider    @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  timestamp       DateTime    @default(now())
+  observedLatency Int
+  successRate     Decimal?    @db.Decimal(8, 6)
+  healthStatus    String
+  environment     Environment
+  dataSource      DataSource
+
+  @@index([providerId, timestamp])
+}

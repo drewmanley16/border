@@ -18,6 +18,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Each workspace package has its own lint setup.
+    "services/**",
+    "packages/**",
+    "examples/**",
   ]),
 ]);
 

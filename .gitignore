@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Examples are safe to commit
+!.env.example
+
+# Routing service
+/services/routing/dist
+/services/routing/src/generated
+/packages/sdk/dist

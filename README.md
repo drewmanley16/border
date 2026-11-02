@@ -41,6 +41,10 @@ TransactionProvider ──> network (src/lib/network.ts)
 - **Land comes from data.** `earthData.ts` turns Natural Earth TopoJSON (`public/geo`) into a land mask, a dot lattice and border lines when the page loads.
 - **The session lives in the layout.** The simulation and globe are mounted from `AppShell`, so moving to Analytics doesn't reset them.
 
+## Route comparison API
+
+`services/routing` is a separate Fastify service that compares international payment routes, with a TypeScript SDK in `packages/sdk`. Its data is also simulated. See [its README](services/routing/README.md).
+
 ## Connecting real data
 
 Implement `TransactionProvider` (`src/lib/providers/types.ts`): emit a transaction when first seen, then emit it again under the same `id` when its status changes. `RealTransactionProvider` is a placeholder that documents the rules. In short, raw onchain transfers are not international payments, and geography must come from an authorized source, never inferred.
