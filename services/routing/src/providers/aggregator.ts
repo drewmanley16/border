@@ -79,7 +79,8 @@ function validate(provider: QuoteProvider, raw: unknown): ProviderQuote[] {
   const quotes: ProviderQuote[] = parsed.data;
   for (const { edge } of quotes) {
     if (edge.providerId !== provider.id) throw new InvalidResponse(`Edge ${edge.id} belongs to another provider`);
-    if (edge.dataSource !== provider.dataSource) throw new InvalidResponse(`Edge ${edge.id} has the wrong data source`);
+    const liveStage = edge.dataSource === "live" && provider.liveEdgeKinds?.includes(edge.kind);
+    if (edge.dataSource !== provider.dataSource && !liveStage) throw new InvalidResponse(`Edge ${edge.id} has the wrong data source`);
     try {
       assetDecimals(edge.inputAsset);
       assetDecimals(edge.outputAsset);

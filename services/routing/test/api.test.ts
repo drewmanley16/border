@@ -6,6 +6,7 @@ import { generateApiKey, hashApiKey } from "../src/http/apiKeys.js";
 import { corridorsFromScenario } from "../src/providers/corridors.js";
 import { createSimulatedProviders } from "../src/providers/simulated/adapter.js";
 import { QuoteAggregator, type QuoteCache } from "../src/providers/aggregator.js";
+import type { FxRateSource } from "../src/providers/live/fxRates.js";
 import { DEFAULT_SCENARIO, SCENARIOS } from "../src/providers/simulated/scenarios.js";
 import { ProviderError, type ProviderQuote, type QuoteProvider } from "../src/providers/types.js";
 import { MemoryStore } from "../src/store/memoryStore.js";
@@ -25,9 +26,10 @@ interface Setup {
   env?: Record<string, string>;
   now?: () => Date;
   providers?: QuoteProvider[];
+  fxRates?: FxRateSource;
 }
 
-async function start({ env = {}, now = () => new Date(), providers }: Setup = {}) {
+async function start({ env = {}, now = () => new Date(), providers, fxRates }: Setup = {}) {
   const store = new MemoryStore(corridorsFromScenario(DEFAULT_SCENARIO));
   store.addApiKey(hashApiKey(API_KEY), { id: "key_a", name: "A", environment: "sandbox" });
   store.addApiKey(hashApiKey("sf_test_other"), { id: "key_b", name: "B", environment: "sandbox" });
@@ -38,9 +40,73 @@ async function start({ env = {}, now = () => new Date(), providers }: Setup = {}
     logger: false,
     retryDelayMs: 1,
     ...(providers ? { providers } : {}),
+    fxRates: fxRates ?? { get: async () => undefined },
+    providerQuotes: { get: async () => undefined },
+    fxHistory: { get: async () => undefined },
   });
   return { app, store };
 }
+
+describe("GET /v1/network-conditions", () => {
+  it("needs no key, and reports unavailable with no endpoints", async () => {
+    const { app } = await start();
+    const response = await app.inject({ method: "GET", url: "/v1/network-conditions" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().refreshSeconds).toBe(300);
+    expect(response.json().networks.map((entry: { status: string }) => entry.status)).toEqual(["unavailable", "unavailable", "unavailable"]);
+  });
+});
+
+describe("GET /v1/fx-rates", () => {
+  it("returns no rates rather than made-up ones when the source is down", async () => {
+    const { app } = await start();
+    const response = await app.inject({ method: "GET", url: "/v1/fx-rates" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: "unavailable", date: null, rates: {} });
+  });
+
+  it("returns the published rates", async () => {
+    const fxRates: FxRateSource = { get: async () => ({ base: "USD", date: "2026-11-02", rates: { USD: 1, JPY: 157.9 }, observedAt: new Date().toISOString() }) };
+    const { app } = await start({ fxRates });
+    const response = await app.inject({ method: "GET", url: "/v1/fx-rates" });
+    expect(response.json()).toMatchObject({ status: "live", date: "2026-11-02", rates: { JPY: 157.9 } });
+  });
+});
+
+describe("GET /v1/fx-history", () => {
+  it("returns no points rather than an invented line", async () => {
+    const { app } = await start();
+    const response = await app.inject({ method: "GET", url: "/v1/fx-history?from=USD&to=JPY" });
+    expect(response.json()).toEqual({ status: "unavailable", points: [] });
+  });
+});
+
+describe("GET /v1/provider-quotes", () => {
+  it("says so when there are no quotes", async () => {
+    const { app } = await start();
+    const response = await app.inject({ method: "GET", url: "/v1/provider-quotes?from=USD&to=JPY&amount=1000" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: "unavailable", quotes: [] });
+  });
+
+  it("rejects a bad request", async () => {
+    const { app } = await start();
+    const response = await app.inject({ method: "GET", url: "/v1/provider-quotes?from=usd&to=JPY&amount=-1" });
+    expect(response.statusCode).toBe(400);
+  });
+});
+
+describe("GET /v1/chain-activity", () => {
+  it("never invents activity when no endpoint is configured", async () => {
+    const { app } = await start();
+    const response = await app.inject({ method: "GET", url: "/v1/chain-activity" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().chains).toMatchObject([
+      { chain: "Ethereum", status: "unavailable", transferCount: null, largest: [] },
+      { chain: "Base", status: "unavailable", transferCount: null, largest: [] },
+    ]);
+  });
+});
 
 const compare = (instance: FastifyInstance, body: unknown = compareBody, headers: Record<string, string> = auth) =>
   instance.inject({ method: "POST", url: "/v1/routes/compare", payload: body as object, headers });

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { loadEarthData, type EarthData } from "@/lib/earthData";
-import { useAppStore } from "@/store/transactionStore";
+import { useAppStore } from "@/store/appStore";
 
 const EARTH_VERTEX = /* glsl */ `
   varying vec3 vDir;

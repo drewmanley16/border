@@ -14,7 +14,8 @@
   --color-gold: #fbbf24;
   --color-danger: #f87171;
 
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
   --breakpoint-xs: 26rem;
 }
 

@@ -10,7 +10,7 @@ POST /v1/routes/compare  →  10 ranked routes
 ...
 ```
 
-> **Simulated data, and quotes only.** Every fee, rate, duration and reliability figure comes from illustrative fixtures in `src/providers/simulated/scenarios.ts`. They aren't the real costs or performance of any company. Every response labels this, and every quote is a nonbinding estimate. This service moves no money and has no custody, swaps, signing or transfers. A quote doesn't make a payment executable or compliant.
+> **Simulated data, and quotes only.** Fees, rates, durations and reliability figures come from illustrative fixtures in `src/providers/simulated/scenarios.ts`, except that a network transfer stage can use observed conditions when RPC endpoints are configured (see [Live network conditions](#live-network-conditions)). The figures aren't the real costs or performance of any company. Every response labels this, and every quote is a nonbinding estimate. This service moves no money and has no custody, swaps, signing or transfers. A quote doesn't make a payment executable or compliant.
 
 ## Quick start
 
@@ -134,6 +134,18 @@ Precision follows ISO 4217 (JPY 0, USD 2, KWD 3), with stablecoins at 6. Amounts
 A timeout, outage, rate limit, invalid response or stale quote from one provider becomes a status in `providers` and removes only its routes. Each provider has a timeout (`PROVIDER_TIMEOUT_MS`), concurrency is bounded (`PROVIDER_CONCURRENCY`), and transient failures are retried, because quotes are safe reads. Responses are validated before use, including refusing a customer rate better than its reference rate.
 
 Redis is optional. It shares rate limits between instances and caches provider quotes, never past their expiry and partitioned by environment and scenario.
+
+## Live network conditions
+
+Set `QUICKNODE_ETHEREUM_URL`, `QUICKNODE_BASE_URL` and `QUICKNODE_SOLANA_URL` to replace the invented fee and time on a transfer stage with figures read from the chain. Those stages report `dataSource: "live"`, while the route stays `simulated` because its other stages are. Only the `default` scenario uses them, so the failure scenarios stay reproducible.
+
+| Figure | Source | Assumption |
+|---|---|---|
+| Ethereum, Base fee | `eth_feeHistory`, Chainlink ETH/USD, plus the OP Stack L1 data fee on Base | 65,000 gas for a token transfer |
+| Solana fee | Base fee, `getRecentPrioritizationFees`, Chainlink SOL/USD read from Ethereum | One signature, 10,000 compute units |
+| Duration | Recent block or slot time | 12 confirmations on Ethereum, 10 on Base, 32 on Solana |
+
+Solana needs the Ethereum URL too, for its price feed. Readings are reused for `NETWORK_CONDITIONS_TTL_MS` (5 minutes by default), and no chain is read until something asks. `GET /v1/network-conditions` publishes them without an API key, from the same cached readings. `GET /v1/fx-rates` serves ECB reference rates, and `GET /v1/provider-quotes` serves what named providers deliver, from Wise's public comparison data. It stays off unless `PROVIDER_QUOTES_ENABLED=true`, because Wise hasn't confirmed that its data may be republished. `GET /v1/chain-activity` does the same for real USDC and USDT Transfer events from the last few blocks on Ethereum and Base. If an endpoint is missing or a read fails, the stage falls back to its simulated figures and is labeled simulated. These calls are read-only. Endpoint URLs contain access tokens, so treat them as secrets.
 
 Setting `STABLEFLOW_ENV=production` refuses to start until a live provider exists, so simulated figures can't be served as production quotes. See `src/providers/live/README.md` for adding one.
 

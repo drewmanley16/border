@@ -162,6 +162,83 @@ const place = z.object({
   locationType: z.literal("representative"),
 });
 
+export const networkConditionsResponseSchema = z.object({
+  networks: z.array(z.object({
+    network: z.enum(["Ethereum", "Base", "Solana"]),
+    status: z.enum(["live", "unavailable"]),
+    feeUSD: z.string().nullable(),
+    estimatedDurationSeconds: z.number().nullable(),
+    observedAt: z.string().nullable(),
+  })),
+  refreshSeconds: z.number(),
+  note: z.string(),
+});
+
+const coinVolumes = z.object({ USDC: z.string().optional(), USDT: z.string().optional() });
+
+export const chainActivityResponseSchema = z.object({
+  chains: z.array(z.object({
+    chain: z.enum(["Ethereum", "Base"]),
+    status: z.enum(["live", "unavailable"]),
+    fromBlock: z.number().nullable(),
+    toBlock: z.number().nullable(),
+    windowSeconds: z.number().nullable(),
+    transferCount: z.number().nullable(),
+    volumeByCoin: coinVolumes,
+    countByCoin: z.object({ USDC: z.number().optional(), USDT: z.number().optional() }),
+    largest: z.array(z.object({
+      coin: z.enum(["USDC", "USDT"]),
+      amount: z.string(),
+      from: z.string(),
+      to: z.string(),
+      txHash: z.string(),
+      blockNumber: z.number(),
+      timestamp: z.string().nullable(),
+    })),
+    observedAt: z.string().nullable(),
+  })),
+  refreshSeconds: z.number(),
+  note: z.string(),
+});
+
+export const providerQuotesQuerySchema = z.object({
+  from: z.string().regex(/^[A-Z]{3}$/),
+  to: z.string().regex(/^[A-Z]{3}$/),
+  amount: z.coerce.number().positive().max(10_000_000).transform((value) => Math.round(value * 100) / 100),
+  fromCountry: z.string().regex(/^[A-Z]{2}$/).optional(),
+  toCountry: z.string().regex(/^[A-Z]{2}$/).optional(),
+});
+
+export const providerQuotesResponseSchema = z.object({
+  status: z.enum(["live", "unavailable"]),
+  quotes: z.array(z.object({
+    name: z.string(),
+    type: z.enum(["bank", "provider"]),
+    fee: z.number(),
+    rate: z.number(),
+    received: z.number(),
+    midMarket: z.boolean(),
+    collectedAt: z.string(),
+    deliveryHours: z.object({ min: z.number(), max: z.number() }).nullable(),
+  })),
+  note: z.string(),
+});
+
+export const fxHistoryQuerySchema = z.object({ from: z.string().regex(/^[A-Z]{3}$/), to: z.string().regex(/^[A-Z]{3}$/) });
+
+export const fxHistoryResponseSchema = z.object({
+  status: z.enum(["live", "unavailable"]),
+  points: z.array(z.object({ date: z.string(), rate: z.number() })),
+});
+
+export const fxRatesResponseSchema = z.object({
+  status: z.enum(["live", "unavailable"]),
+  base: z.literal("USD"),
+  date: z.string().nullable(),
+  rates: z.record(z.string(), z.number()),
+  note: z.string(),
+});
+
 export const visualizationSchema = z
   .object({
     routeId: z.string(),

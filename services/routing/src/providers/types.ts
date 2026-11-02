@@ -37,6 +37,8 @@ export interface QuoteProvider {
   name: string;
   type: "stablecoin" | "bank_fx" | "bridge";
   dataSource: DataSource;
+  /** Stages this provider may report as live, even when the provider isn't. */
+  liveEdgeKinds?: readonly PaymentEdge["kind"][];
   getCapabilities(): Promise<ProviderCapabilities>;
   getQuotes(request: ProviderQuoteRequest): Promise<ProviderQuote[]>;
   getHealth(): Promise<ProviderHealth>;

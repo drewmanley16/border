@@ -1,9 +1,10 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { COIN_COLORS } from "@/lib/constants";
-import type { Stablecoin, TransactionStatus } from "@/types/transaction";
-import { useAppStore } from "@/store/transactionStore";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import type { Coin } from "@/lib/liveData";
+import { useAppStore } from "@/store/appStore";
+
+const COIN_COLORS: Record<Coin, string> = { USDC: "#3B82F6", USDT: "#10B981" };
 
 /** Tweens to `value` by writing to the DOM, so it never re-renders React. */
 export function AnimatedNumber({
@@ -52,7 +53,7 @@ export function AnimatedNumber({
   );
 }
 
-export function CoinDot({ coin, className = "" }: { coin: Stablecoin; className?: string }) {
+export function CoinDot({ coin, className = "" }: { coin: Coin; className?: string }) {
   return (
     <span
       aria-hidden
@@ -61,17 +62,6 @@ export function CoinDot({ coin, className = "" }: { coin: Stablecoin; className?
     />
   );
 }
-
-const STATUS_STYLE: Record<TransactionStatus, { label: string; className: string }> = {
-  pending: { label: "Pending", className: "text-ink-2" },
-  settled: { label: "Settled", className: "text-ink-2" },
-  failed: { label: "Failed", className: "text-danger" },
-};
-
-export const StatusText = memo(function StatusText({ status }: { status: TransactionStatus }) {
-  const { label, className } = STATUS_STYLE[status];
-  return <span className={className}>{label}</span>;
-});
 
 const listeners = new Set<() => void>();
 let clockTimer: ReturnType<typeof setInterval> | null = null;

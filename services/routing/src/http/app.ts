@@ -15,7 +15,12 @@ import { ASSUMPTIONS, ESTIMATE_DISCLAIMER, QUOTE_VERSION, type QuoteService } fr
 import { buildVisualization } from "../quotes/visualization.js";
 import type { ApiKeyRecord, Store } from "../store/types.js";
 import { hashApiKey } from "./apiKeys.js";
-import { compareRequestSchema, compareResponseSchema, corridorQuerySchema, corridorsResponseSchema, errorSchema, healthResponseSchema, providersResponseSchema, routeDetailSchema, visualizationSchema } from "./schemas.js";
+import type { ActivityChain, ChainActivitySource } from "../providers/live/chainActivity.js";
+import type { FxHistorySource } from "../providers/live/fxHistory.js";
+import type { FxRateSource } from "../providers/live/fxRates.js";
+import type { ProviderQuoteRequest, ProviderQuoteSource } from "../providers/live/providerQuotes.js";
+import type { LiveNetwork, NetworkConditionSource } from "../providers/live/networkConditions.js";
+import { chainActivityResponseSchema, compareRequestSchema, compareResponseSchema, corridorQuerySchema, corridorsResponseSchema, errorSchema, fxHistoryQuerySchema, fxHistoryResponseSchema, fxRatesResponseSchema, healthResponseSchema, providerQuotesQuerySchema, providerQuotesResponseSchema, networkConditionsResponseSchema, providersResponseSchema, routeDetailSchema, visualizationSchema } from "./schemas.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -28,6 +33,11 @@ export interface AppDependencies {
   store: Store;
   storeType: "postgres" | "memory";
   registry: ProviderRegistry;
+  conditions?: NetworkConditionSource;
+  activity?: ChainActivitySource;
+  fxRates?: FxRateSource;
+  fxHistory?: FxHistorySource;
+  providerQuotes?: ProviderQuoteSource;
   quotes: QuoteService;
   redis?: Redis;
   now: () => Date;
@@ -280,6 +290,104 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       }),
     );
     return { providers, note: "Simulated providers are illustrative and don't represent any real company." };
+  });
+
+  // Public on purpose: this is chain data, and it's served from the same cached
+  // reading as quotes, so traffic here can't add RPC calls.
+  api.get("/v1/network-conditions", {
+    schema: {
+      tags: ["Catalog"],
+      summary: "Estimated fee and confirmation time for a stablecoin transfer on each network",
+      response: { 200: networkConditionsResponseSchema, ...errorResponses },
+    },
+  }, async (_request, reply) => {
+    const refreshSeconds = Math.round(env.NETWORK_CONDITIONS_TTL_MS / 1000);
+    const networks = await Promise.all((["Ethereum", "Base", "Solana"] as LiveNetwork[]).map(async (network) => {
+      const condition = await deps.conditions?.get(network);
+      return {
+        network,
+        status: condition ? ("live" as const) : ("unavailable" as const),
+        feeUSD: condition?.feeUSD ?? null,
+        estimatedDurationSeconds: condition?.seconds ?? null,
+        observedAt: condition?.observedAt ?? null,
+      };
+    }));
+    reply.header("cache-control", "public, s-maxage=60");
+    return {
+      networks,
+      refreshSeconds,
+      note: "Estimates for a typical USDC transfer, from observed gas, block times and Chainlink prices. Not a quote.",
+    };
+  });
+
+  api.get("/v1/chain-activity", {
+    schema: {
+      tags: ["Catalog"],
+      summary: "Real USDC and USDT transfers from a short window of recent blocks",
+      response: { 200: chainActivityResponseSchema, ...errorResponses },
+    },
+  }, async (_request, reply) => {
+    const chains = await Promise.all((["Ethereum", "Base"] as ActivityChain[]).map(async (chain) => {
+      const reading = await deps.activity?.get(chain);
+      return reading
+        ? { ...reading, status: "live" as const }
+        : { chain, status: "unavailable" as const, fromBlock: null, toBlock: null, windowSeconds: null, transferCount: null, volumeByCoin: {}, countByCoin: {}, largest: [], observedAt: null };
+    }));
+    reply.header("cache-control", "public, s-maxage=60");
+    return {
+      chains,
+      refreshSeconds: Math.round(env.NETWORK_CONDITIONS_TTL_MS / 1000),
+      note: "Raw token transfers, including exchange and contract activity. A transfer isn't necessarily a payment, and locations are unknown.",
+    };
+  });
+
+  api.get("/v1/fx-rates", {
+    schema: {
+      tags: ["Catalog"],
+      summary: "ECB reference exchange rates per US dollar",
+      response: { 200: fxRatesResponseSchema, ...errorResponses },
+    },
+  }, async (_request, reply) => {
+    const reading = await deps.fxRates?.get();
+    reply.header("cache-control", "public, s-maxage=300");
+    return {
+      status: reading ? ("live" as const) : ("unavailable" as const),
+      base: "USD" as const,
+      date: reading?.date ?? null,
+      rates: reading?.rates ?? {},
+      note: "European Central Bank reference rates, published each working day. Providers charge a spread on top.",
+    };
+  });
+
+  api.get("/v1/fx-history", {
+    schema: {
+      tags: ["Catalog"],
+      summary: "ECB reference rates for a currency pair over the last 30 days",
+      querystring: fxHistoryQuerySchema,
+      response: { 200: fxHistoryResponseSchema, ...errorResponses },
+    },
+  }, async (request, reply) => {
+    const { from, to } = request.query as { from: string; to: string };
+    const reading = await deps.fxHistory?.get(from, to);
+    reply.header("cache-control", "public, s-maxage=3600");
+    return { status: reading ? ("live" as const) : ("unavailable" as const), points: reading?.points ?? [] };
+  });
+
+  api.get("/v1/provider-quotes", {
+    schema: {
+      tags: ["Catalog"],
+      summary: "What named providers deliver for a transfer, from Wise's public comparison data",
+      querystring: providerQuotesQuerySchema,
+      response: { 200: providerQuotesResponseSchema, ...errorResponses },
+    },
+  }, async (request, reply) => {
+    const reading = await deps.providerQuotes?.get(request.query as ProviderQuoteRequest);
+    reply.header("cache-control", "public, s-maxage=300");
+    return {
+      status: reading ? ("live" as const) : ("unavailable" as const),
+      quotes: reading?.quotes ?? [],
+      note: "Collected and published by Wise, which is itself a listed provider. Quotes are indicative, and each has its own collection time.",
+    };
   });
 
   api.get("/v1/health", {

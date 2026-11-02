@@ -1,21 +1,20 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BarChart3, Globe2, Info, Settings2 } from "lucide-react";
-import { network } from "@/lib/network";
-import { unlockSound } from "@/lib/sound";
-import { useAppStore } from "@/store/transactionStore";
+import { summarizeActivity } from "@/lib/liveData";
+import { useAppStore } from "@/store/appStore";
+import { useLiveStore } from "@/store/liveStore";
 import { IconButton, usePopover } from "@/components/ui/Primitives";
 
-const LINKS = [
+export const LINKS = [
   { href: "/", label: "Globe", icon: Globe2 },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/about", label: "About", icon: Info },
 ] as const;
 
-function Logo() {
+export function Logo() {
   return (
     <svg viewBox="0 0 32 32" className="size-7" fill="none" aria-hidden>
       <circle cx="16" cy="16" r="11" stroke="#38BDF8" strokeOpacity=".4" />
@@ -26,11 +25,12 @@ function Logo() {
   );
 }
 
-export function SimulatedBadge() {
+export function DataBadge() {
+  const live = useLiveStore((state) => summarizeActivity(state.activity).isLive);
   return (
-    <span className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-cyan/30 bg-cyan/8 px-2.5 py-1 text-[11px] font-medium tracking-wide text-cyan">
-      <span className="live-dot size-1.5 rounded-full bg-cyan" />
-      SIMULATED LIVE NETWORK
+    <span className={`inline-flex items-center gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-wide ${live ? "border-green/30 bg-green/8 text-green" : "border-line text-ink-2"}`}>
+      <span className={`size-1.5 rounded-full ${live ? "live-dot bg-green" : "bg-ink-3"}`} />
+      {live ? "LIVE ONCHAIN DATA" : "NO LIVE DATA"}
     </span>
   );
 }
@@ -45,15 +45,10 @@ function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange:
   );
 }
 
-function Settings() {
+export function Settings() {
   const { open, setOpen, root } = usePopover();
-  const soundOn = useAppStore((state) => state.soundOn);
+  const autoRotate = useAppStore((state) => state.autoRotate);
   const bloomOn = useAppStore((state) => state.bloomOn);
-  const seed = useAppStore((state) => state.seed);
-  const [draft, setDraft] = useState<string | null>(null);
-  const value = draft ?? String(seed);
-  const parsed = Number(value);
-  const valid = value !== "" && Number.isInteger(parsed) && parsed >= 0;
 
   return (
     <div ref={root} className="relative">
@@ -61,47 +56,9 @@ function Settings() {
         <Settings2 className="size-[18px]" />
       </IconButton>
       {open ? (
-        <div className="glass absolute top-11 right-0 w-64 rounded-xl p-3">
-          <Toggle
-            label="Arrival sounds"
-            on={soundOn}
-            onChange={(on) => {
-              if (on) unlockSound();
-              useAppStore.setState({ soundOn: on });
-            }}
-          />
+        <div className="glass absolute top-11 right-0 w-56 rounded-xl p-3 lg:top-auto lg:right-auto lg:bottom-0 lg:left-14 lg:!bg-void">
+          <Toggle label="Rotate globe" on={autoRotate} onChange={(on) => useAppStore.setState({ autoRotate: on })} />
           <Toggle label="Glow" on={bloomOn} onChange={(on) => useAppStore.setState({ bloomOn: on })} />
-          <form
-            className="mt-2 border-t border-line pt-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!valid) return;
-              network.restart(parsed);
-              setDraft(null);
-              setOpen(false);
-            }}
-          >
-            <label htmlFor="seed" className="text-sm">
-              Simulation seed
-            </label>
-            <div className="mt-1.5 flex gap-2">
-              <input
-                id="seed"
-                inputMode="numeric"
-                value={value}
-                onChange={(e) => setDraft(e.target.value)}
-                className="w-full min-w-0 rounded-lg border border-line bg-void/60 px-2.5 py-1.5 text-sm"
-              />
-              <button
-                type="submit"
-                disabled={!valid}
-                className="shrink-0 rounded-lg bg-white/10 px-2.5 text-sm transition-colors hover:bg-white/16 disabled:opacity-40"
-              >
-                Restart
-              </button>
-            </div>
-            <p className="mt-2 text-xs leading-5 text-ink-2">Restarting clears this session. A seed always replays the same transactions.</p>
-          </form>
         </div>
       ) : null}
     </div>
@@ -112,7 +69,7 @@ export function Navbar() {
   const pathname = usePathname();
 
   return (
-    <header className="pointer-events-none fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 px-3 sm:px-4">
+    <header className="pointer-events-none fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 px-3 sm:px-4 lg:hidden">
       <Link href="/" className="pointer-events-auto flex items-center gap-2 rounded-lg" aria-label="StableFlow home">
         <Logo />
         <span className="text-[15px] font-medium tracking-tight">StableFlow</span>
@@ -140,7 +97,7 @@ export function Navbar() {
 
       <div className="pointer-events-auto flex items-center gap-2 sm:ml-auto">
         <span className="hidden sm:inline-flex">
-          <SimulatedBadge />
+          <DataBadge />
         </span>
         <Settings />
       </div>

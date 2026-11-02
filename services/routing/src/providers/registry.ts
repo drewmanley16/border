@@ -1,3 +1,4 @@
+import type { NetworkConditionSource } from "./live/networkConditions.js";
 import { createSimulatedProviders, type Clock } from "./simulated/adapter.js";
 import { SCENARIOS, type Scenario } from "./simulated/scenarios.js";
 import type { QuoteProvider } from "./types.js";
@@ -11,6 +12,7 @@ export class ProviderRegistry {
     private readonly clock: Clock,
     private readonly scenarios: Readonly<Record<string, Scenario>> = SCENARIOS,
     private readonly override?: QuoteProvider[],
+    private readonly conditions?: NetworkConditionSource,
   ) {
     if (!scenarios[defaultScenario]) throw new Error(`Unknown simulation scenario: ${defaultScenario}`);
   }
@@ -27,7 +29,9 @@ export class ProviderRegistry {
     if (this.override) return this.override;
     let set = this.sets.get(name);
     if (!set) {
-      set = createSimulatedProviders(this.scenarios[name]!, this.clock);
+      // Only the default scenario takes observed conditions: the others
+      // exist to stage specific failures, which real data would overwrite.
+      set = createSimulatedProviders(this.scenarios[name]!, this.clock, name === "default" ? this.conditions : undefined);
       this.sets.set(name, set);
     }
     return set;

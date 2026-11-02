@@ -1,6 +1,9 @@
 # Adding a live provider
 
-There are no live adapters yet, on purpose. An adapter belongs here only once
+`networkConditions.ts` supplies observed network fees and times to the transfer
+stages of the simulated providers. It reads chain data only and isn't a provider.
+
+There are no live provider adapters yet, on purpose. An adapter belongs here only once
 we hold credentials and have confirmed from the provider's own documentation
 which countries, rails and quote endpoints it offers. Nothing is assumed.
 

@@ -5,19 +5,23 @@ export const metadata: Metadata = { title: "About · StableFlow" };
 const SECTIONS = [
   {
     heading: "What you’re looking at",
-    body: "StableFlow draws stablecoin transfers as shooting stars between world cities. Each star is one simulated payment. Its color is the stablecoin, its size follows the amount, and its speed follows the settlement time of the chain it uses.",
+    body: "StableFlow reads public blockchains and shows what it finds: real USDC and USDT transfers on Ethereum and Base, and the current cost of a transfer on Ethereum, Base and Solana. Every transfer links to its transaction on a block explorer, so you can check it yourself.",
   },
   {
-    heading: "Nothing here is a real payment",
-    body: "Every transaction is generated in your browser by a seeded simulator. Corridors, amounts and coin mix are modeled to look plausible, but they aren’t measurements of real traffic. Public blockchains don’t record where senders and recipients are, so a raw onchain transfer can’t be placed on a map or called an international payment.",
+    heading: "Why the globe has no routes",
+    body: "Blockchains don’t record where senders and recipients are, so drawing a transfer between two places would mean making the places up. The globe only marks the places you choose yourself.",
   },
   {
-    heading: "Reproducing a session",
-    body: "The same seed produces the same sequence of transactions. Set one in Settings, or add ?seed=42 to the address.",
+    heading: "How to read the numbers",
+    body: "Each refresh samples a few recent blocks, so the totals are a snapshot and not a market total. They include exchange and contract movements, which means a transfer isn’t always a payment. Tokens are valued at $1. Fees are estimates for a typical transfer, based on current gas prices, block times and Chainlink prices.",
   },
   {
-    heading: "Connecting real data",
-    body: "The app reads transactions through a small provider interface, so a verified feed can replace the simulator. Geography would need to come from an authorized source, such as a licensed payments partner, and private payment details would stay out of the browser.",
+    heading: "Sending money",
+    body: "The send calculator uses European Central Bank reference rates and current chain fees. The rate chart shows published ECB rates for the last 30 days. When shown, provider prices are indicative figures collected by Wise, which is also one of the listed providers, and each shows when it was priced. The calculator lists each country’s main payment rails without fees, because each bank sets its own. Pins mark the capital of the countries you choose.",
+  },
+  {
+    heading: "When data is missing",
+    body: "If a chain can’t be read, the page says so and shows nothing for it. No figure is ever estimated to fill the gap.",
   },
   {
     heading: "Map data",
@@ -27,8 +31,8 @@ const SECTIONS = [
 
 export default function AboutPage() {
   return (
-    <main className="relative z-10 mx-auto min-h-dvh max-w-2xl px-5 pt-28 pb-20">
-      <h1 className="text-4xl font-medium tracking-tight">Watch money move at internet speed.</h1>
+    <main className="relative z-10 mx-auto min-h-dvh max-w-2xl px-5 pt-28 pb-20 lg:pl-[92px]">
+      <h1 className="text-4xl font-medium tracking-tight">Stablecoin activity, as it is onchain.</h1>
       <div className="mt-12 space-y-10">
         {SECTIONS.map(({ heading, body }) => (
           <section key={heading}>

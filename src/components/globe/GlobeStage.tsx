@@ -4,7 +4,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { useAppStore } from "@/store/transactionStore";
+import { useAppStore } from "@/store/appStore";
 
 const GlobeScene = dynamic(() => import("./GlobeScene"), { ssr: false });
 
@@ -27,7 +27,7 @@ function WebGLFallback() {
       <div className="max-w-sm text-center">
         <h2 className="text-lg font-medium text-ink">The 3D globe can’t run in this browser</h2>
         <p className="mt-2 text-sm leading-6 text-ink-2">
-          It needs WebGL. Turn on hardware acceleration or try another browser. The live feed and
+          It needs WebGL. Turn on hardware acceleration or try another browser. Live transfers and
           analytics keep working without it.
         </p>
       </div>

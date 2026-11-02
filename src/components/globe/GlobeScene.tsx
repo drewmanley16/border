@@ -4,12 +4,12 @@ import { Component, Suspense, useState, type ReactNode } from "react";
 import { Canvas } from "@react-three/fiber";
 import { PerformanceMonitor } from "@react-three/drei";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
-import { useAppStore } from "@/store/transactionStore";
-import { ArcSystem } from "./ArcSystem";
+import { useAppStore } from "@/store/appStore";
 import { Atmosphere } from "./Atmosphere";
 import { CameraRig, FOV } from "./CameraRig";
-import { CityMarkers } from "./CityMarkers";
 import { Earth } from "./Earth";
+import { GlobePins } from "./GlobePins";
+import { GlobeRoute } from "./GlobeRoute";
 import { Starfield } from "./Starfield";
 
 class GlobeErrorBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
@@ -46,7 +46,7 @@ export default function GlobeScene({ active, fallback }: { active: boolean; fall
         frameloop={active ? "always" : "never"}
         camera={{ fov: FOV, near: 0.05, far: 300 }}
         gl={{ antialias: true, alpha: false, stencil: false, powerPreference: "high-performance" }}
-        aria-label="Interactive globe of simulated stablecoin transfers"
+        aria-label="Interactive globe"
         role="img"
       >
         <color attach="background" args={["#05070D"]} />
@@ -59,8 +59,8 @@ export default function GlobeScene({ active, fallback }: { active: boolean; fall
             <Starfield />
             <Earth />
             <Atmosphere />
-            <CityMarkers />
-            <ArcSystem />
+            <GlobePins />
+            <GlobeRoute />
           </Suspense>
           <CameraRig />
           <Glow />

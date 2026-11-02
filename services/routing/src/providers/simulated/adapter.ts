@@ -1,6 +1,7 @@
 import { bps, Decimal, ONE, type DecimalValue } from "../../domain/money.js";
 import type { FeeModel, PaymentEdge } from "../../domain/types.js";
 import { node } from "../../graph/nodes.js";
+import type { NetworkConditionSource } from "../live/networkConditions.js";
 import { ProviderError, type ProviderCapabilities, type ProviderHealth, type ProviderQuote, type ProviderQuoteRequest, type QuoteProvider } from "../types.js";
 import type { BankProviderParams, BridgeProviderParams, DestinationRail, FundingRail, OnchainProviderParams, ProviderParams, Scenario } from "./scenarios.js";
 
@@ -21,18 +22,22 @@ function abortable(ms: number, signal: AbortSignal): Promise<void> {
 
 /**
  * Deterministic: the same scenario and request always produce the same edges.
- * Figures are illustrative, and every edge is stamped `dataSource: "simulated"`.
+ * Figures are illustrative, and every edge is stamped `dataSource: "simulated"`,
+ * except a transfer priced from observed network conditions when a source is
+ * supplied. That edge alone is `live`, so its route stays labeled simulated.
  */
 export class SimulatedProvider implements QuoteProvider {
   readonly id: string;
   readonly name: string;
   readonly type;
   readonly dataSource = "simulated" as const;
+  readonly liveEdgeKinds = ["transfer"] as const;
 
   constructor(
     private readonly params: ProviderParams,
     private readonly scenario: Scenario,
     private readonly clock: Clock,
+    private readonly conditions?: NetworkConditionSource,
   ) {
     this.id = params.id;
     this.name = params.name;
@@ -64,6 +69,20 @@ export class SimulatedProvider implements QuoteProvider {
       enabled: true,
       dataSource: "simulated",
     };
+  }
+
+  /** Swaps the invented network fee and time for observed ones, when there are any. */
+  private async withLiveTransfer(edges: PaymentEdge[]): Promise<PaymentEdge[]> {
+    const { params: p } = this;
+    if (p.kind !== "onchain" || !this.conditions) return edges;
+    const condition = await this.conditions.get(p.network);
+    if (!condition) return edges;
+    return edges.map((edge) => edge.kind !== "transfer" ? edge : {
+      ...edge,
+      feeModel: { percentBps: "0", fixed: new Decimal(condition.feeUSD).div(this.usdValue(edge.inputAsset)).toFixed(12) },
+      estimatedDurationSeconds: condition.seconds,
+      dataSource: "live",
+    });
   }
 
   private rate(from: string, to: string, spreadBps: string) {
@@ -260,7 +279,7 @@ export class SimulatedProvider implements QuoteProvider {
     if (!funding || !rail) return [];
 
     const { params: p } = this;
-    const edges = p.kind === "onchain" ? this.onchainEdges(p, funding, rail) : p.kind === "bank_fx" ? this.bankEdges(p, funding, rail) : this.bridgeEdges(p);
+    const edges = await this.withLiveTransfer(p.kind === "onchain" ? this.onchainEdges(p, funding, rail) : p.kind === "bank_fx" ? this.bankEdges(p, funding, rail) : this.bridgeEdges(p));
 
     const quotedAt = this.clock();
     const expiresAt = new Date(quotedAt.getTime() + this.scenario.quoteTtlSeconds * 1000);
@@ -285,7 +304,7 @@ export class SimulatedProvider implements QuoteProvider {
   }
 }
 
-export function createSimulatedProviders(scenario: Scenario, clock: Clock): QuoteProvider[] {
-  return scenario.providers.map((params) => new SimulatedProvider(params, scenario, clock));
+export function createSimulatedProviders(scenario: Scenario, clock: Clock, conditions?: NetworkConditionSource): QuoteProvider[] {
+  return scenario.providers.map((params) => new SimulatedProvider(params, scenario, clock, conditions));
 }
 

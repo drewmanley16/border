@@ -13,7 +13,7 @@ export const QUOTE_VERSION = 1;
 export const ESTIMATE_DISCLAIMER =
   "Nonbinding estimates for comparison only. Rates are not guaranteed and no payment can be made from this quote.";
 const SIMULATED_NOTE =
-  "All fees, rates, durations and reliability figures are simulated and illustrative. They are not the actual costs or performance of any real provider.";
+  "Fees, rates, durations and reliability figures are simulated and illustrative unless a stage is marked live. Live stages estimate a typical transfer from observed network conditions. None of this is the actual cost or performance of any real provider.";
 
 const LIVE_NOTE = "Built from live provider quotes. Figures remain nonbinding estimates.";
 
