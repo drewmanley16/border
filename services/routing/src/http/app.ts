@@ -3,7 +3,6 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
-import swaggerUi from "@fastify/swagger-ui";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { hasZodFastifySchemaValidationErrors, isResponseSerializationError, jsonSchemaTransform, jsonSchemaTransformObject, serializerCompiler, validatorCompiler, type ZodTypeProvider } from "fastify-type-provider-zod";
 import type { Redis } from "ioredis";
@@ -36,7 +35,35 @@ export interface AppDependencies {
 }
 
 const VERSION = "0.1.0";
+const SWAGGER_UI = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14";
+
+/** One static page. @fastify/swagger-ui's file server can't load on Vercel. */
+const DOCS_PAGE = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StableFlow Routing API</title>
+    <link rel="stylesheet" href="${SWAGGER_UI}/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="docs"></div>
+    <script src="${SWAGGER_UI}/swagger-ui-bundle.js"></script>
+    <script>SwaggerUIBundle({ url: "/openapi.json", dom_id: "#docs" });</script>
+  </body>
+</html>`;
+const HEALTH_TIMEOUT_MS = 3_000;
 const REQUEST_ID_PATTERN = /^[\w-]{8,64}$/;
+
+/** A stuck dependency should report as unavailable, not hang the health check. */
+function probe(check: Promise<unknown>): Promise<"ok" | "unavailable"> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<"unavailable">((resolve) => {
+    timer = setTimeout(() => resolve("unavailable"), HEALTH_TIMEOUT_MS);
+  });
+  const result = check.then(() => "ok" as const, () => "unavailable" as const);
+  return Promise.race([result, timeout]).finally(() => clearTimeout(timer));
+}
 
 function presentedKey(request: FastifyRequest): string | null {
   const header = request.headers["x-api-key"];
@@ -67,6 +94,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       return typeof supplied === "string" && REQUEST_ID_PATTERN.test(supplied) ? supplied : randomUUID();
     },
     bodyLimit: 32 * 1024,
+    // On Vercel the client IP arrives in x-forwarded-for, set by the platform.
+    trustProxy: Boolean(process.env.VERCEL),
   });
 
   app.setValidatorCompiler(validatorCompiler);
@@ -143,7 +172,6 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     transform: jsonSchemaTransform,
     transformObject: jsonSchemaTransformObject,
   });
-  await app.register(swaggerUi, { routePrefix: "/docs" });
 
   const api = app.withTypeProvider<ZodTypeProvider>();
 
@@ -261,8 +289,10 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       response: { 200: healthResponseSchema, 503: healthResponseSchema },
     },
   }, async (_request, reply) => {
-    const database = await store.ping().then(() => "ok" as const, () => "unavailable" as const);
-    const redisStatus = !redis ? ("not_configured" as const) : await redis.ping().then(() => "ok" as const, () => "unavailable" as const);
+    const [database, redisStatus] = await Promise.all([
+      probe(store.ping()),
+      redis ? probe(redis.ping()) : Promise.resolve("not_configured" as const),
+    ]);
     const health = await Promise.all(registry.providers().map((provider) => provider.getHealth().catch(() => ({ status: "unavailable" as const }))));
     const count = (status: string) => health.filter((entry) => entry.status === status).length;
     const healthy = count("healthy");
@@ -281,6 +311,9 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   });
 
   app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
+  for (const url of ["/docs", "/docs/"]) {
+    app.get(url, { schema: { hide: true } }, (_request, reply) => reply.type("text/html").send(DOCS_PAGE));
+  }
 
   return app;
 }

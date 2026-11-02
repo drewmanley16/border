@@ -141,6 +141,12 @@ Setting `STABLEFLOW_ENV=production` refuses to start until a live provider exist
 
 `GET /v1/routes/:routeId/visualization` returns representative coordinates, segments, estimates and comparison flags (`isCheapest`, `isFastest`, `relativeCost`). Responses set `isRealPayment: false`, `kind: "hypothetical_route"` and `coordinatesAreRepresentative: true`. The coordinates are one fixed city per country, not payment locations, and quoted routes must never be animated as if a payment happened.
 
+## Hosting
+
+The sandbox runs on Vercel at https://stableflow-api-one.vercel.app, with Prisma Postgres and Upstash Redis from the Marketplace. `api/index.mjs` is the Vercel entrypoint and hands requests to the compiled app, while `src/index.ts` serves local and Docker runs.
+
+Deploy from this folder with `vercel deploy --prod`. Apply migrations before deploying a schema change.
+
 ## Development
 
 ```bash

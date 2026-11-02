@@ -3,7 +3,8 @@ import type { QuoteCache } from "../providers/aggregator.js";
 import type { ProviderQuote } from "../providers/types.js";
 
 export function createRedis(url: string): Redis {
-  return new Redis(url, { maxRetriesPerRequest: 1, enableOfflineQueue: false, lazyConnect: false });
+  // Commands wait for the connection, which a serverless cold start has to open.
+  return new Redis(url, { maxRetriesPerRequest: 1, connectTimeout: 3_000 });
 }
 
 /** Keeps quotes for no longer than they're valid. Failures just skip the cache. */
